@@ -25,6 +25,8 @@ VOCA = os.path.join(THIS_FOLDER, 'voca.bin')
 MAX_FREQ_DIC = os.path.join(THIS_FOLDER, 'max_freq_dic.bin')
 ANSWER = os.path.join(THIS_FOLDER, 'answer.txt')
 
+TKN_PTN = re.compile(r'.*__[\d][\d].*')
+
 try:
     TRAIN_SET = os.path.join(THIS_FOLDER, sys.argv[1])
     TEST_SET = os.path.join(THIS_FOLDER, sys.argv[2])
@@ -43,27 +45,20 @@ def build_voca():
     vocabulary is an dictionary, key = "WORD__NN/POS" value = appearing count
     the function saves vocabulary as file "voca.bin" in current directory
     """
-    fr_train = open(TRAIN_SET, 'r')
-    fw_voca = open(VOCA, 'wb')
-    token_list = []
-    while True:
-        line = fr_train.readline()
-        if not line:
-            break
-        line = line.replace("\n", "")
-        new_tokens = re.split('[ ]', line)
-        for token in new_tokens:
-            if re.compile(r'.*__[\d][\d].*').match(token):
-                token_list.append(token)
 
-    text = nltk.Text(token_list)
-    vocabulary = text.vocab()
+    with open(TRAIN_SET, 'r') as fr_train, open(VOCA, 'wb') as fw_voca:
+        token_list = []
+        for line in fr_train:
+            line = line.replace("\n", "")
+            new_tokens = re.split('[ ]', line)
+            for token in new_tokens:
+                if TKN_PTN.match(token):
+                    token_list.append(token)
 
-    pickle.dump(vocabulary, fw_voca)
-    fw_voca.close()
-    fr_train.close()
+        text = nltk.Text(token_list)
+        vocabulary = text.vocab()
 
-    return
+        pickle.dump(vocabulary, fw_voca)
 
 
 def build_max_freq_dic():
@@ -73,42 +68,30 @@ def build_max_freq_dic():
     key = "WORD/POS", value = the most frequent sense of the word (formed "WORD__NN/POS")
     the function saves MaxFreqDic as file "max_freq_dic.bin" in current directory
     """
-    fr_voca = open(VOCA, 'rb')
-    fw_max_freq_dic = open(MAX_FREQ_DIC, 'wb')
-    vocabulary = pickle.load(fr_voca)
 
-    keys = vocabulary.keys()
-    keys_without_sense = set(map(lambda y: re.sub(r'__[\d][\d]', '', y), keys))
-    max_freq_dic = {}
-    for key in keys_without_sense:
-        split_key = re.split('/', key)
-        word = split_key[0]
-        pos = split_key[1]
+    with open(VOCA, 'rb') as fr_voca, open(MAX_FREQ_DIC, 'wb') as fw_max_freq_dic:
+        vocabulary = pickle.load(fr_voca)
+        keys = vocabulary.keys()
+        keys_without_sense = set(map(lambda y: re.sub(r'__[\d][\d]', '', y), keys))
+        max_freq_dic = {}
+        for key in keys_without_sense:
+            split_key = re.split('/', key)
+            word = split_key[0]
+            pos = split_key[1]
 
-        max_freq = -1
-        max_sense = "UNKNOWN"
-        for num in range(1, 99):
-            if num < 10:
-                target_word = word + "__0" + str(num) + "/" + pos
-            else:
-                target_word = word + "__" + str(num) + "/" + pos
-            freq = vocabulary.get(target_word, -1)
-            if freq > max_freq:
-                max_freq = freq
-                max_sense = target_word
+            max_freq = -1
+            max_sense = "UNKNOWN"
+            for num in range(1, 99):
+                target_word = '{}__{:02d}/{}'.format(word, num, pos)
+                freq = vocabulary.get(target_word, -1)
+                if freq > max_freq:
+                    max_freq = freq
+                    max_sense = target_word
 
-        #keyWithSenseList =list(filter(lambda y: re.match(word+"__[\d][\d]/"+pos, y) != None, keys))
-        # if keyWithSenseList != []:
-        #    freqList = list(map(lambda y: vocabulary[y], keyWithSenseList))
-        #    max_sense = keyWithSenseList[freqList.index(max(freqList))]
-        #    max_freq_dic[key] = max_sense
+            max_freq_dic[key] = max_sense
 
-        max_freq_dic[key] = max_sense
+        pickle.dump(max_freq_dic, fw_max_freq_dic)
 
-    pickle.dump(max_freq_dic, fw_max_freq_dic)
-
-    fw_max_freq_dic.close()
-    fr_voca.close()
 
 
 def make_answer():
@@ -119,32 +102,26 @@ def make_answer():
     and it will cause wrong answering in evaluation #
     # answer sentences are saved as file, "answer.txt" in current directory #
     """
-    fr_test = open(TEST_SET, 'r')
-    fw_answer = open(ANSWER, 'w')
-    fr_max_freq_dic = open(MAX_FREQ_DIC, 'rb')
-    max_freq_dic = pickle.load(fr_max_freq_dic)
 
-    while True:
-        line = fr_test.readline()
-        if not line:
-            break
-        line = line.replace("\n", "")
-        tokens = re.split('[ ]', line)
+    with open(TEST_SET, 'r') as fr_test, \
+        open(ANSWER, 'w') as fw_answer, \
+        open(MAX_FREQ_DIC, 'rb') as fr_max_freq_dic:
 
-        for token in tokens:
-            if re.compile(r'.*__[\d][\d].*').match(token):
-                query_word = re.sub(r'__[\d][\d]', '', token)
-                answer_word = max_freq_dic.get(query_word, "UNKNOWN")
-            else:
-                answer_word = token
-            fw_answer.write(answer_word + " ")
+        max_freq_dic = pickle.load(fr_max_freq_dic)
+        for line in fr_test:
+            line = line.replace("\n", "")
+            tokens = re.split('[ ]', line)
 
-        fw_answer.write('\n')
+            for token in tokens:
+                if TKN_PTN.match(token):
+                    query_word = re.sub(r'__[\d][\d]', '', token)
+                    answer_word = max_freq_dic.get(query_word, "UNKNOWN")
+                else:
+                    answer_word = token
+                fw_answer.write(answer_word + " ")
 
-    fr_max_freq_dic.close()
-    fr_test.close()
-    fw_answer.close()
-    return
+            fw_answer.write('\n')
+
 
 
 def evaluate():
@@ -152,36 +129,34 @@ def evaluate():
     # evaluate answer by comparing "test_set.txt" with "answer.txt" #
     # only homograph words are counted for scoring #
     """
-    fr_test = open(TEST_SET, 'r')
-    fr_answer = open(ANSWER, 'r')
 
-    count = 0
-    correct = 0
+    with open(TEST_SET, 'r') as fr_test, open(ANSWER, 'r') as fr_answer:
 
-    while True:
-        test_line = fr_test.readline().replace("\n", "")
-        answer_line = fr_answer.readline().replace("\n", "")
+        count = 0
+        correct = 0
 
-        if not test_line or not answer_line:
-            break
+        while True:
+            test_line = fr_test.readline().replace("\n", "")
+            answer_line = fr_answer.readline().replace("\n", "")
 
-        test_tokens = re.split('[ ]', test_line)
-        answer_tokens = re.split('[ ]', answer_line)
+            if not test_line or not answer_line:
+                break
 
-        merged_tokens = zip(test_tokens, answer_tokens)
+            test_tokens = re.split('[ ]', test_line)
+            answer_tokens = re.split('[ ]', answer_line)
 
-        for token1, token2 in merged_tokens:
-            if re.compile(r'.*__[\d][\d].*').match(token1):
-                count = count + 1
-                if token1 == token2:
-                    correct = correct + 1
+            merged_tokens = zip(test_tokens, answer_tokens)
 
-    print("The number of homograph : ", count)
-    print("The number of correct answer : ", correct)
-    print("Accuracy : ", (correct / count) * 100)
+            for token1, token2 in merged_tokens:
+                if TKN_PTN.match(token1):
+                    count = count + 1
+                    if token1 == token2:
+                        correct = correct + 1
 
-    fr_test.close()
-    fr_answer.close()
+        print("The number of homograph : ", count)
+        print("The number of correct answer : ", correct)
+        print("Accuracy : ", (correct / count) * 100)
+
 
 def main():
     """
