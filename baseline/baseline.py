@@ -87,11 +87,11 @@ def build_max_freq_dic():
 
         max_freq = -1
         max_sense = "UNKNOWN"
-        for n in range(1, 99):
-            if n < 10:
-                target_word = word + "__0" + str(n) + "/" + pos
+        for num in range(1, 99):
+            if num < 10:
+                target_word = word + "__0" + str(num) + "/" + pos
             else:
-                target_word = word + "__" + str(n) + "/" + pos
+                target_word = word + "__" + str(num) + "/" + pos
             freq = vocabulary.get(target_word, -1)
             if freq > max_freq:
                 max_freq = freq
@@ -180,6 +180,8 @@ def evaluate():
     print("The number of correct answer : ", correct)
     print("Accuracy : ", (correct / count) * 100)
 
+    fr_test.close()
+    fr_answer.close()
 
 build_voca()
 print("building voca done!")
