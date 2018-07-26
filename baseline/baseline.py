@@ -183,13 +183,21 @@ def evaluate():
     fr_test.close()
     fr_answer.close()
 
-build_voca()
-print("building voca done!")
+def main():
+    """
+    this is main function
+    """
 
-build_max_freq_dic()
-print("building max_freq_dic done!")
+    build_voca()
+    print("building voca done!")
 
-make_answer()
-print("answering done!")
+    build_max_freq_dic()
+    print("building max_freq_dic done!")
 
-evaluate()
+    make_answer()
+    print("answering done!")
+
+    evaluate()
+
+if __name__ == '__main__':
+    main()
