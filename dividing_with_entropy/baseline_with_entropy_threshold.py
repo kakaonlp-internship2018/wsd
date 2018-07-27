@@ -1,5 +1,5 @@
 """
-baseline evalutator
+baseline evalutator with entropy threshold
 __author__ = 'jeff.yu (jeff.yu@kakaocorp.com)'
 __copyright__ = 'No copyright, just copyleft!'
 """
@@ -11,10 +11,9 @@ import re
 import sys
 import pickle
 import os
-import nltk
+#import operator
+import numpy as np
 
-# You need to download nltk package 'punkt' first
-# nltk.download('punkt')
 
 
 # FILE PATH #
@@ -24,14 +23,16 @@ THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
 VOCA = os.path.join(THIS_FOLDER, 'voca.bin')
 MAX_FREQ_DIC = os.path.join(THIS_FOLDER, 'max_freq_dic.bin')
 ANSWER = os.path.join(THIS_FOLDER, 'answer.txt')
+ENTROPY_DIC = os.path.join(THIS_FOLDER, 'entropy_dic.bin')
 
 TKN_PTN = re.compile(r'.*__[\d][\d].*')
 
 try:
     TRAIN_SET = os.path.join(THIS_FOLDER, sys.argv[1])
     TEST_SET = os.path.join(THIS_FOLDER, sys.argv[2])
+    ENTROPY_THRESHOLD = float(sys.argv[3])
 except BaseException:
-    print('usage: python3 baseline.py transformed_train_file_name transfromed_test_file_name')
+    print('usage: python3 baseline.py [transformed_train_file] [transfromed_test_file] entropy_threshold')
     sys.exit(1)
 
 
@@ -39,10 +40,29 @@ except BaseException:
 # functions #
 #############
 
-def build_voca_with_freq_dic():
+def calculate_entropy(count_list):
+    """
+    Arg:
+        count_list : list of the word appearing count
+    Return:
+        shannon entropy of the word
+
+    Returns shannon entropy of input count_list
+    """
+
+    return sum(map(lambda y: -y/sum(count_list)*np.log2(y/sum(count_list)), count_list))
+
+
+def build_voca():
     """
     voca : key = word_without_sense, value = freq_dic
     freq_dic : key = sense_number, value = appearing count
+
+    Function that build homograph vocabulary from training set
+    vocabulary is an dictionary, key = "WORD/POS", value = freq_dic
+    freq_dic is also an dictionary, key = "NN" (word sense), value = appearing count
+
+    the function saves vocabulary as file "voca.bin" in current directory
     """
     vocabulary = {}
     with open(TRAIN_SET, 'r') as fr_train, open(VOCA, 'wb') as fw_voca:
@@ -58,75 +78,33 @@ def build_voca_with_freq_dic():
                     vocabulary[key] = freq_dic
         pickle.dump(vocabulary, fw_voca)
 
-def build_voca():
-    """
-    Function that build homograph vocabulary from training set
-    vocabulary is an dictionary, key = "WORD__NN/POS" value = appearing count
-    the function saves vocabulary as file "voca.bin" in current directory
-    """
 
-    with open(TRAIN_SET, 'r') as fr_train, open(VOCA, 'wb') as fw_voca:
-        token_list = []
-        for line in fr_train:
-            line = line.replace("\n", "")
-            new_tokens = re.split('[ ]', line)
-            for token in new_tokens:
-                if TKN_PTN.match(token):
-                    token_list.append(token)
-
-        text = nltk.Text(token_list)
-        vocabulary = text.vocab()
-
-        pickle.dump(vocabulary, fw_voca)
-
-def build_max_freq_dic2():
+def build_max_freq_dic_and_ent_dic():
     """
-    another version of build_max_freq_dic function
-    It uses build_voca_with_freq_dic()
+    Function that build max_freq_dic and entropy_dic from vocabulary
+    max_freq_dic is an dictionary,
+    key = "WORD/POS", value = the most frequent sense of the word (formed "WORD__NN/POS")
+    the function saves max_freq_dic as file "max_freq_dic.bin" in current directory
+
+    entropy_dic is also an dictionary,
+    key = "WORD/POS", value = shannon entropy of the word
+    It also will be saved as file "entropy_dic.bin" in current directory
+
     """
-    with open(VOCA, 'rb') as fr_voca, open(MAX_FREQ_DIC, 'wb') as fw_max_freq_dic:
+    with open(VOCA, 'rb') as fr_voca, open(MAX_FREQ_DIC, 'wb') as fw_max_freq_dic,\
+    open(ENTROPY_DIC, 'wb') as fw_entropy_dic:
         vocabulary = pickle.load(fr_voca)
-        print(len(vocabulary))
         max_freq_dic = {}
+        entropy_dic = {}
         for key, freq_dic in vocabulary.items():
             max_freq_dic[key] \
             = key[:key.index("/")] + "__" + max(freq_dic, key=freq_dic.get) + key[key.index("/"):]
+            entropy_dic[key] = calculate_entropy(freq_dic.values())
 
-        pickle.dump(max_freq_dic, fw_max_freq_dic)
+        #sorted_ent_list = sorted(entropy_dic.items(), \
+        #                key=operator.itemgetter(1), reverse=True)
 
-
-
-def build_max_freq_dic():
-    """
-    Function that build MaxFreqDic from vocabulary
-    MaxFreqDic is an dictionary,
-    key = "WORD/POS", value = the most frequent sense of the word (formed "WORD__NN/POS")
-    the function saves MaxFreqDic as file "max_freq_dic.bin" in current directory
-    """
-
-    with open(VOCA, 'rb') as fr_voca, open(MAX_FREQ_DIC, 'wb') as fw_max_freq_dic:
-        vocabulary = pickle.load(fr_voca)
-        keys = vocabulary.keys()
-        keys_without_sense = set(map(lambda y: re.sub(r'__[\d][\d]', '', y), keys))
-        max_freq_dic = {}
-
-
-        for key in keys_without_sense:
-            split_key = re.split('/', key)
-            word = split_key[0]
-            pos = split_key[1]
-
-            max_freq = -1
-            max_sense = "UNKNOWN"
-            for num in range(1, 99):
-                target_word = '{}__{:02d}/{}'.format(word, num, pos)
-                freq = vocabulary.get(target_word, -1)
-                if freq > max_freq:
-                    max_freq = freq
-                    max_sense = target_word
-
-            max_freq_dic[key] = max_sense
-
+        pickle.dump(entropy_dic, fw_entropy_dic)
         pickle.dump(max_freq_dic, fw_max_freq_dic)
 
 
@@ -153,13 +131,25 @@ def make_answer():
                 if TKN_PTN.match(token):
                     query_word = re.sub(r'__[\d][\d]', '', token)
                     answer_word = max_freq_dic.get(query_word, "UNKNOWN")
+                    # TODO: answer_word = answer_with_entropy(query_word, low_threshold, high_threshold)
                 else:
                     answer_word = token
                 fw_answer.write(answer_word + " ")
 
             fw_answer.write('\n')
 
+# TODO
+def answer_with_entropy(query_word, low_th, high_th):
+    """
+    Args:
+        query_word: query_word to be disambiguated
+        low_th : lower entropy threshold
+        high_th : higher entropy threshold
 
+    Return:
+        answer_word (formed "WORD__NN/POS)
+    """
+    # 입력 엔트로피에 기준에 따라 낮은 파트 중간 파트 높은 파트 모델 다른거 써서 answer_word 찾아냄.
 
 def evaluate():
     """
@@ -167,8 +157,9 @@ def evaluate():
     # only homograph words are counted for scoring #
     """
 
-    with open(TEST_SET, 'r') as fr_test, open(ANSWER, 'r') as fr_answer:
-
+    with open(TEST_SET, 'r') as fr_test, open(ANSWER, 'r') as fr_answer, open(ENTROPY_DIC, 'rb') as fr_ent_dic:
+        
+        ent_dic = pickle.load(fr_ent_dic)
         count = 0
         correct = 0
 
@@ -185,12 +176,12 @@ def evaluate():
             merged_tokens = zip(test_tokens, answer_tokens)
 
             for token1, token2 in merged_tokens:
-                if TKN_PTN.match(token1):
+                if TKN_PTN.match(token1) and ent_dic.get(re.sub(r'__[\d][\d]', '', token1), 0) >= ENTROPY_THRESHOLD:
                     count = count + 1
                     if token1 == token2:
                         correct = correct + 1
 
-        print("The number of homograph : ", count)
+        print("The number of homograph eo-jeul : ", count)
         print("The number of correct answer : ", correct)
         print("Accuracy : ", (correct / count) * 100)
 
@@ -201,12 +192,10 @@ def main():
     """
 
     #build_voca()
-    #build_voca_with_freq_dic()
     #print("building voca done!")
 
-    #build_max_freq_dic()
-    build_max_freq_dic2()
-    print("building max_freq_dic done!")
+    build_max_freq_dic_and_ent_dic()
+    print("building max_freq_dic and entropy_dic done!")
 
     make_answer()
     print("answering done!")
