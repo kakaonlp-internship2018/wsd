@@ -10,13 +10,14 @@ def main():
     """
     this is main function
     """
-    remove_sense = True
+    remove_sense = False
 
     try:
         with open(sys.argv[1], 'r') as fr_source, open(sys.argv[2], 'w') as fw_dist:
             for count, line in enumerate(fr_source):
                 if count % 3 == 1:
                     line = line.rstrip('\r\n')
+                    line = re.sub(r'__[8-9][\d]', "", line)
                     if remove_sense:
                         line = re.sub(r'__[\d][\d]', "", line)
                     line = re.split('[+ ]', line)
