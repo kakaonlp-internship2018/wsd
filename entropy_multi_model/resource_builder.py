@@ -11,6 +11,7 @@ import re
 import sys
 import pickle
 import os
+import logging
 import numpy as np
 from sklearn import svm
 
@@ -21,7 +22,8 @@ VOCA = os.path.join(THIS_FOLDER, 'voca.bin')
 MAX_FREQ_DIC = os.path.join(THIS_FOLDER, 'max_freq_dic.bin')
 ENTROPY_DIC = os.path.join(THIS_FOLDER, 'entropy_dic.bin')
 SVM_DIC = os.path.join(THIS_FOLDER, 'svm_dic.bin')
-GLOVE = os.path.join(THIS_FOLDER, 'glove/vectors.txt')
+GLOVE = os.path.join(THIS_FOLDER, 'vectors.bin')
+GLOVE_TXT = os.path.join(THIS_FOLDER, 'glove/vectors.txt')
 
 TKN_PTN = re.compile(r'.*__[\d][\d].*')
 
@@ -37,6 +39,13 @@ except BaseException:
 
 # dimension of embedding vector
 VECTOR_DIMENSION = 100
+
+# define LOGGER
+
+PROGRAM = os.path.basename(sys.argv[0])
+LOGGER = logging.getLogger(PROGRAM)
+logging.basicConfig(format='%(asctime)s: %(levelname)s: %(message)s')
+logging.root.setLevel(level=logging.INFO)
 
 
 #############
@@ -54,6 +63,7 @@ def calculate_entropy(count_list):
     """
 
     return sum(map(lambda y: -y/sum(count_list)*np.log2(y/sum(count_list)), count_list))
+
 
 def make_feature_vector(model, sentence, target_word_index, vector_dimension):
     """
@@ -77,6 +87,9 @@ def make_feature_vector(model, sentence, target_word_index, vector_dimension):
         except KeyError:
             pass
 
+    # if all tokens in sentence did not hit
+    if (sum_vector == np.zeros([vector_dimension, ])).all():
+        return None
     return sum_vector
 
 
@@ -106,6 +119,24 @@ def build_voca():
         pickle.dump(vocabulary, fw_voca)
 
 
+def make_glove_bin():
+    """
+    transform "vectors.txt" to "vectors.bin"
+    """
+    with open(GLOVE_TXT, 'r') as fr_txt, open(GLOVE, 'wb') as fw_bin:
+        glove_model = {}
+
+        count = 0
+        for line in fr_txt:
+            vals = line.rstrip().split(' ')
+            glove_model[vals[0]] = [float(x) for x in vals[1:]]
+            count = count + 1
+            if count % 100000 == 0:
+                LOGGER.info("%s word vectors loaded", str(count))
+        LOGGER.info("Loading embedding vectors done, %s", str(count))
+
+        pickle.dump(glove_model, fw_bin)
+
 
 def build_svm_for_difficult_word():
     """
@@ -116,13 +147,10 @@ def build_svm_for_difficult_word():
     It needs pre-trained glove model as file "glove/vectors.txt"
     """
     with open(TRAIN_SET, 'r') as fr_train, open(ENTROPY_DIC, 'rb') as fr_ent_dic,\
-    open(GLOVE, 'r') as fr_vectors:
-    #open(SVM_DIC, 'rb') as fr_svm_dic:
+            open(GLOVE, 'rb') as fr_glove:
+        # open(SVM_DIC, 'rb') as fr_svm_dic:
         ent_dic = pickle.load(fr_ent_dic)
-        glove_model = {}
-        for line in fr_vectors:
-            vals = line.rstrip().split(' ')
-            glove_model[vals[0]] = [float(x) for x in vals[1:]]
+        glove_model = pickle.load(fr_glove)
         """
         try:
             svm_dic = pickle.load(fr_svm_dic)
@@ -131,6 +159,7 @@ def build_svm_for_difficult_word():
         """
         svm_dic = {}
 
+        count = 0
         # build training data for each difficult word
         train_dic = {}  # key = WORD/POS, value = [(sense, feature sum vector)]
         for line in fr_train:
@@ -140,22 +169,41 @@ def build_svm_for_difficult_word():
             for index, token in enumerate(new_tokens):
                 if TKN_PTN.match(token):
                     key = re.sub(r'__[\d][\d]', '', token)
-                    if ent_dic[key] >= ENTROPY_THRESHOLD: #and svm_dic.get(key) is None:
+                    # and svm_dic.get(key) is None:
+                    if ent_dic[key] >= ENTROPY_THRESHOLD:
+                        tokens_for_emb = re.split(
+                            '[ ]', re.sub(r'__[\d][\d]', '', line))
+                        feature_vector = make_feature_vector(
+                            glove_model, tokens_for_emb, index, VECTOR_DIMENSION)
+                        if feature_vector is None:
+                            continue
                         value = train_dic.get(key, [])
                         sense = token[token.index("/")-2:token.index("/")]
-                        tokens_for_emb = re.split('[ ]', re.sub(r'__[\d][\d]', '', line))
-                        value.append((sense, make_feature_vector(
-                            glove_model, tokens_for_emb, index, VECTOR_DIMENSION)))
-                        train_dic[key] = value
 
+                        value.append((sense, feature_vector))
+                        train_dic[key] = value
+                        count = count + 1
+                        if count % 100000 == 0:
+                            LOGGER.info(
+                                "%s tokens finished building training data", str(count))
+
+        LOGGER.info("Building training data done, %s", str(count))
+
+        count = 0
         # build svm model for each difficult word
         for key, training_data in train_dic.items():
             svm_model = svm.LinearSVC()
             sense_list, vector_list = zip(*training_data)
-
-            svm_model.fit(vector_list, sense_list)
+            try:
+                svm_model.fit(vector_list, sense_list)
+            except ValueError:  # if there is only one class in training data
+                continue
             svm_dic[key] = svm_model
+            count = count + 1
+            if count % 1000 == 0:
+                LOGGER.info("%s words finished training svm model", str(count))
 
+        LOGGER.info("Training svm model done, %s", str(count))
 
         with open(SVM_DIC, 'wb') as fw_svm_dic:
             pickle.dump(svm_dic, fw_svm_dic)
@@ -180,7 +228,7 @@ def build_max_freq_dic_and_ent_dic():
         entropy_dic = {}
         for key, freq_dic in vocabulary.items():
             max_freq_dic[key] = key[:key.index("/")] + \
-                    "__" + max(freq_dic, key=freq_dic.get) + key[key.index("/"):]
+                "__" + max(freq_dic, key=freq_dic.get) + key[key.index("/"):]
             entropy_dic[key] = calculate_entropy(freq_dic.values())
 
         # sorted_ent_list = sorted(entropy_dic.items(), \
@@ -195,14 +243,17 @@ def main():
     this is main function
     """
 
-    #build_voca()
+    # build_voca()
     #print("building voca done!")
 
-    #build_max_freq_dic_and_ent_dic()
+    # build_max_freq_dic_and_ent_dic()
     #print("building max_freq_dic and entropy_dic done!")
+
+    make_glove_bin()
 
     build_svm_for_difficult_word()
     print("building svm models done!")
+
 
 if __name__ == '__main__':
     main()

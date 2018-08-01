@@ -22,7 +22,7 @@ MAX_FREQ_DIC = os.path.join(THIS_FOLDER, 'max_freq_dic.bin')
 ANSWER = os.path.join(THIS_FOLDER, 'answer.txt')
 ENTROPY_DIC = os.path.join(THIS_FOLDER, 'entropy_dic.bin')
 SVM_DIC = os.path.join(THIS_FOLDER, 'svm_dic.bin')
-GLOVE = os.path.join(THIS_FOLDER, 'glove/vectors.txt')
+GLOVE = os.path.join(THIS_FOLDER, 'vectors.bin')
 
 TKN_PTN = re.compile(r'.*__[\d][\d].*')
 
@@ -70,6 +70,8 @@ def make_feature_vector(model, sentence, target_word_index, vector_dimension):
         except KeyError:
             pass
 
+    if (sum_vector == np.zeros([vector_dimension, ])).all(): # if all tokens in sentence did not hit
+        return None
     return sum_vector
 
 
@@ -86,17 +88,13 @@ def make_answer():
             open(ANSWER, 'w') as fw_answer, \
             open(MAX_FREQ_DIC, 'rb') as fr_max_freq_dic, \
             open(ENTROPY_DIC, 'rb') as fr_ent_dic, \
-            open(GLOVE, 'r') as fr_vectors, \
+            open(GLOVE, 'rb') as fr_vectors, \
             open(SVM_DIC, 'rb') as fr_svm_dic:
 
         svm_dic = pickle.load(fr_svm_dic)
         max_freq_dic = pickle.load(fr_max_freq_dic)
         ent_dic = pickle.load(fr_ent_dic)
-
-        glove_model = {}
-        for line in fr_vectors:
-            vals = line.rstrip().split(' ')
-            glove_model[vals[0]] = [float(x) for x in vals[1:]]
+        glove_model = pickle.load(fr_vectors)
 
         for line in fr_test:
             line = line.replace("\n", "")
@@ -114,7 +112,7 @@ def make_answer():
                         else:
                             feature_vector = make_feature_vector(glove_model, re.split(
                                 '[ ]', re.sub(r'__[\d][\d]', '', line)), index, VECTOR_DIMENSION)
-                            if svm_dic.get(query_word) is not None:
+                            if svm_dic.get(query_word) is not None and feature_vector is not None:
                                 answer_sense = svm_dic[query_word].predict(
                                     np.array([feature_vector]))[0]
                                 answer_word = query_word[:query_word.index(
@@ -139,8 +137,8 @@ def evaluate():
     # only homograph words are counted for scoring #
     """
 
-    with open(TEST_SET, 'r') as fr_test, open(ANSWER, 'r') as fr_answer:#, \
-            #open(ENTROPY_DIC, 'rb') as fr_ent_dic:
+    with open(TEST_SET, 'r') as fr_test, open(ANSWER, 'r') as fr_answer:
+        #, open(ENTROPY_DIC, 'rb') as fr_ent_dic:
 
         #ent_dic = pickle.load(fr_ent_dic)
         count = 0
@@ -165,9 +163,8 @@ def evaluate():
             merged_tokens = zip(test_tokens, answer_tokens)
 
             for token1, token2 in merged_tokens:
-                # and ent_dic.get(key, -1) >= ENTROPY_THRESHOLD:
-                if TKN_PTN.match(token1):
-                    key = re.sub(r'__[\d][\d]', '', token1)
+                key = re.sub(r'__[\d][\d]', '', token1)
+                if TKN_PTN.match(token1):# and ent_dic.get(key, -1) >= ENTROPY_THRESHOLD:
                     count = count + 1
                     checked_words.add(key)
                     if token1 == token2:
