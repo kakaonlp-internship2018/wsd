@@ -12,40 +12,58 @@ import sys
 import pickle
 import os
 import logging
+import argparse
 import numpy as np
 from sklearn import svm
 
-# FILE PATH #
 
-THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
-VOCA = os.path.join(THIS_FOLDER, 'voca.bin')
-MAX_FREQ_DIC = os.path.join(THIS_FOLDER, 'max_freq_dic.bin')
-ENTROPY_DIC = os.path.join(THIS_FOLDER, 'entropy_dic.bin')
-SVM_DIC = os.path.join(THIS_FOLDER, 'svm_dic.bin')
-GLOVE = os.path.join(THIS_FOLDER, 'vectors.bin')
-GLOVE_TXT = os.path.join(THIS_FOLDER, 'glove/vectors.txt')
+if __name__ == '__main__':
+    # FILE PATH #
+    THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
+    VOCA = os.path.join(THIS_FOLDER, 'voca.bin')
+    MAX_FREQ_DIC = os.path.join(THIS_FOLDER, 'max_freq_dic.bin')
+    ENTROPY_DIC = os.path.join(THIS_FOLDER, 'entropy_dic.bin')
+    SVM_DIC = os.path.join(THIS_FOLDER, 'svm_dic.bin')
+    GLOVE = os.path.join(THIS_FOLDER, 'vectors.bin')
+    GLOVE_TXT = os.path.join(THIS_FOLDER, 'glove/vectors.txt')
+    TRN_DIC = os.path.join(THIS_FOLDER, 'trn_dic.bin')
 
-TKN_PTN = re.compile(r'.*__[\d][\d].*')
+    # define regex pattern
+    TKN_PTN = re.compile(r'.*__[\d][\d].*')
 
-try:
-    TRAIN_SET = os.path.join(THIS_FOLDER, sys.argv[1])
-    TEST_SET = os.path.join(THIS_FOLDER, sys.argv[2])
-    ENTROPY_THRESHOLD = float(sys.argv[3])
-except BaseException:
-    print(
-        'usage: python3 baseline.py [transformed_train_file] [transfromed_test_file] ent_threshold')
-    sys.exit(1)
+    # define LOGGER
 
+    PROGRAM = os.path.basename(sys.argv[0])
+    LOGGER = logging.getLogger(PROGRAM)
+    logging.basicConfig(format='%(asctime)s: %(levelname)s: %(message)s')
+    logging.root.setLevel(level=logging.INFO)
 
-# dimension of embedding vector
-VECTOR_DIMENSION = 100
+    # define argparser
+    PARSER = argparse.ArgumentParser(description='This is resource builder.')
+    PARSER.add_argument('TRAIN_SET', type=str, metavar='Training_set',
+                        help='Transformed training set file')
+    PARSER.add_argument('--ent', type=float, default=0.1,
+                        help='Entropy threshold, default=0.1')
+    PARSER.add_argument('--min_max', dest='min_max', action='store_true', default=False,
+                        help='Add min_max vector to feature vector')
+    #PARSER.add_argument('--weight', help='Apply weight to feature vector')
+    PARSER.add_argument('--win', type=int, default=2,
+                        help='Set window size, default=2')
+    PARSER.add_argument('--dim', type=int, default=100,
+                        help='Set embedding dimension, default=100')
+    PARSER.add_argument('--merge', type=str, default='concat', choices=['concat', 'sum'],
+                        help='How to merge feature vector, default=concat')
+    # PARSER.add_argument('--model', type=str, default='ssdfad', choice
+    ARGS = PARSER.parse_args()
 
-# define LOGGER
-
-PROGRAM = os.path.basename(sys.argv[0])
-LOGGER = logging.getLogger(PROGRAM)
-logging.basicConfig(format='%(asctime)s: %(levelname)s: %(message)s')
-logging.root.setLevel(level=logging.INFO)
+    # set global variables
+    TRAIN_SET = ARGS.TRAIN_SET
+    ENTROPY_THRESHOLD = ARGS.ent
+    VECTOR_DIMENSION = ARGS.dim
+    HALF_WINDOW_SIZE = ARGS.win
+    MIN_MAX = ARGS.min_max
+    #WEIGHT = ARGS.weight
+    MERGE = ARGS.merge
 
 
 #############
@@ -65,32 +83,103 @@ def calculate_entropy(count_list):
     return sum(map(lambda y: -y/sum(count_list)*np.log2(y/sum(count_list)), count_list))
 
 
-def make_feature_vector(model, sentence, target_word_index, vector_dimension):
+def make_feature_vector(model, sentence, target_word_index, vector_dimension, merge, min_max, win_size):
+    """
+    this is wrapper of "make_feature_vector_sum" and "make_feature_vector_concat"
+    """
+    if merge == 'concat':
+        return make_feature_vector_concat(model, \
+                                sentence, target_word_index, vector_dimension, min_max, win_size)
+    elif merge == 'sum':
+        return make_feature_vector_sum(model,
+                                       sentence, target_word_index, vector_dimension, min_max)
+
+
+def make_feature_vector_sum(model, sentence, target_word_index, vector_dimension, min_max):
     """
     Arg:
-        model : gensim w2v model
-        sentence : word(WORD__NN/POS) list
+        model : word embedding model
+        sentence : word(WORD/POS) list
         target_word_index : index of target word in list
-
+        vector_dimension : word embedding dimension
+        min_max : if true, concat min_max vector to feature_vector
     return:
         sum vector of features
-
     make simple sum vector of all features
     """
 
     sum_vector = np.zeros([vector_dimension, ])
+    if min_max:
+        max_vector = np.zeros([vector_dimension, ])
+        min_vector = np.full([vector_dimension, ], np.Inf)
+
     for index, token in enumerate(sentence):
         if index == target_word_index:
             continue
         try:
             sum_vector = sum_vector + model[token]
+            if min_max:
+                max_vector = np.fmax(max_vector, model[token])
+                min_vector = np.fmin(min_vector, model[token])
         except KeyError:
             pass
 
     # if all tokens in sentence did not hit
     if (sum_vector == np.zeros([vector_dimension, ])).all():
         return None
+    if min_max:
+        return np.concatenate((sum_vector, max_vector, min_vector))
     return sum_vector
+
+
+def make_feature_vector_concat(model, sentence, target_word_index, vector_dimension, min_max, win_size):
+    """
+    Arg:
+        model : word embedding model
+        sentence : word(WORD/POS) list
+        target_word_index : index of target word in list
+        vector_dimension : word embedding dimension
+        min_max : if true, concat min_max vector to feature_vector
+        win_size : window size to concatenate
+
+    return:
+        concat vector of features
+
+    make simple concat vector of all features
+    """
+    embedded_words = [(token, index) for index, token in enumerate(
+        sentence) if index == target_word_index or model.get(token) is not None]
+    embedded_words, index_list = zip(*embedded_words)
+    embedded_words = list(embedded_words)
+    index_list = list(index_list)
+
+    bos_list = ["BOS"] * win_size
+    eos_list = ["EOS"] * win_size
+    new_index = index_list.index(target_word_index) + win_size
+    embedded_words = bos_list + embedded_words + eos_list
+
+    concat_vector = []
+    if min_max:
+        max_vector = np.zeros([vector_dimension, ])
+        min_vector = np.full([vector_dimension, ], np.Inf)
+
+    for index, token in enumerate(embedded_words):
+        if index < new_index - win_size or index > new_index + win_size:
+            continue
+        if index == new_index:
+            continue
+        try:
+            concat_vector = concat_vector + model[token]
+            if min_max:
+                max_vector = np.fmax(max_vector, model[token])
+                min_vector = np.fmin(min_vector, model[token])
+
+        except KeyError:
+            pass
+
+    if min_max:
+        return np.concatenate((np.array(concat_vector), max_vector, min_vector))
+    return np.array(concat_vector)
 
 
 def build_voca():
@@ -121,7 +210,7 @@ def build_voca():
 
 def make_glove_bin():
     """
-    transform "vectors.txt" to "vectors.bin"
+    transform "glove/vectors.txt" to "vectors.bin"
     """
     with open(GLOVE_TXT, 'r') as fr_txt, open(GLOVE, 'wb') as fw_bin:
         glove_model = {}
@@ -138,30 +227,21 @@ def make_glove_bin():
         pickle.dump(glove_model, fw_bin)
 
 
-def build_svm_for_difficult_word():
+def build_training_data_for_difficult_word():
     """
-    build svm model for each difficult word
-    all svm models are store in svm_dic (key: "WORD/POS", value: sklearn_svm_model)
-    and svm_dic is saved as file "svm_dic.bin"
+    build training data dictionary that has key = WORD/POS, value = [(sense, feature vector)]
+    It is used to train each svm model
+    It needs pre-trained glove model as file "vectors.bin"
 
-    It needs pre-trained glove model as file "glove/vectors.txt"
     """
     with open(TRAIN_SET, 'r') as fr_train, open(ENTROPY_DIC, 'rb') as fr_ent_dic,\
             open(GLOVE, 'rb') as fr_glove:
-        # open(SVM_DIC, 'rb') as fr_svm_dic:
         ent_dic = pickle.load(fr_ent_dic)
         glove_model = pickle.load(fr_glove)
-        """
-        try:
-            svm_dic = pickle.load(fr_svm_dic)
-        except EOFError:
-            svm_dic = {}
-        """
-        svm_dic = {}
 
         count = 0
         # build training data for each difficult word
-        train_dic = {}  # key = WORD/POS, value = [(sense, feature sum vector)]
+        train_dic = {}  # key = WORD/POS, value = [(sense, feature vector)]
         for line in fr_train:
             line = line.replace("\n", "")
             new_tokens = re.split('[ ]', line)
@@ -169,12 +249,11 @@ def build_svm_for_difficult_word():
             for index, token in enumerate(new_tokens):
                 if TKN_PTN.match(token):
                     key = re.sub(r'__[\d][\d]', '', token)
-                    # and svm_dic.get(key) is None:
                     if ent_dic[key] >= ENTROPY_THRESHOLD:
                         tokens_for_emb = re.split(
                             '[ ]', re.sub(r'__[\d][\d]', '', line))
-                        feature_vector = make_feature_vector(
-                            glove_model, tokens_for_emb, index, VECTOR_DIMENSION)
+                        feature_vector = make_feature_vector(glove_model, tokens_for_emb, \
+                                index, VECTOR_DIMENSION, MERGE, MIN_MAX, HALF_WINDOW_SIZE)
                         if feature_vector is None:
                             continue
                         value = train_dic.get(key, [])
@@ -189,10 +268,24 @@ def build_svm_for_difficult_word():
 
         LOGGER.info("Building training data done, %s", str(count))
 
+        with open(TRN_DIC, 'wb') as fw_trn_dic:
+            pickle.dump(train_dic, fw_trn_dic)
+
+
+def build_svm_for_difficult_word():
+    """
+    build svm model for each difficult word
+    all svm models are stored in svm_dic (key: "WORD/POS", value: sklearn_svm_model)
+    and svm_dic is saved as file "svm_dic.bin"
+
+    """
+    with open(TRN_DIC, 'rb') as fr_trn_dic, open(SVM_DIC, 'wb') as fw_svm_dic:
+        train_dic = pickle.load(fr_trn_dic)
         count = 0
+        svm_dic = {}
         # build svm model for each difficult word
         for key, training_data in train_dic.items():
-            svm_model = svm.LinearSVC()
+            svm_model = svm.LinearSVC()  # TODO: try various svm model.
             sense_list, vector_list = zip(*training_data)
             try:
                 svm_model.fit(vector_list, sense_list)
@@ -205,8 +298,10 @@ def build_svm_for_difficult_word():
 
         LOGGER.info("Training svm model done, %s", str(count))
 
-        with open(SVM_DIC, 'wb') as fw_svm_dic:
-            pickle.dump(svm_dic, fw_svm_dic)
+        # for convenience, save meta data in svm_dic file (win size, dim, ...)
+        svm_dic["META"] = ARGS
+
+        pickle.dump(svm_dic, fw_svm_dic)
 
 
 def build_max_freq_dic_and_ent_dic():
@@ -249,8 +344,9 @@ def main():
     # build_max_freq_dic_and_ent_dic()
     #print("building max_freq_dic and entropy_dic done!")
 
-    make_glove_bin()
+    # make_glove_bin()
 
+    # build_training_data_for_difficult_word()
     build_svm_for_difficult_word()
     print("building svm models done!")
 
