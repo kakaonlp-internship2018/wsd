@@ -4,6 +4,7 @@ Word Sense Disambiguation
 ## 코퍼스 전처리
 1. /entropy_multi_model 디렉토리의 transform.py 를 이용해 트레이닝 코퍼스와 테스트 코퍼스를 전처리 합니다.
     - transform.py에 커맨드라인 인자로 [처리전 울산 코퍼스 파일이름] 과 [처리후 파일이름] 를 주어 실행하면 됩니다. 
+    - 전처리 과정에서 의미번호가 80 이상인 단어들의 의미태그를 제거하며, 모든 숫자단어들을 "NUM" 으로 치환합니다.
     ~~~ 
     $ python3 transform.py ulsan_corpus_train.txt train_set.txt  
     $ python3 transform.py ulsan_corpus_test.txt test_set.txt 
