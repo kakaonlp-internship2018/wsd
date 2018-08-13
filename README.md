@@ -17,8 +17,8 @@ Word Sense Disambiguation
     $ git clone http://github.com/stanfordnlp/glove
     $ cd glove && make
     $ ./demo.sh 
-    ~~~
-이때 demo.sh의 CORPUS 부분을 수정하여 준비한 코퍼스 경로를 입력해줍니다.
+    ~~~ 
+    이때 demo.sh의 CORPUS 부분을 수정하여 준비한 코퍼스 경로를 입력해줍니다.  
 3. 생성된 vectors.txt 파일을 glove/vectors.txt 경로에 준비합니다.  
 
 ## Baseline 측정법
