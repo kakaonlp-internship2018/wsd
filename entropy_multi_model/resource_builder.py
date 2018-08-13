@@ -48,7 +48,7 @@ if __name__ == '__main__':
                         help='Add min_max vector to feature vector')
     #PARSER.add_argument('--weight', help='Apply weight to feature vector')
     PARSER.add_argument('--win', type=int, default=2,
-                        help='Set window size, default=2')
+                        help='Set window size, default=2, 0: whole sentence (sum case)')
     PARSER.add_argument('--dim', type=int, default=100,
                         help='Set embedding dimension, default=100')
     PARSER.add_argument('--merge', type=str, default='concat', choices=['concat', 'sum'],
@@ -83,7 +83,8 @@ def calculate_entropy(count_list):
     return sum(map(lambda y: -y/sum(count_list)*np.log2(y/sum(count_list)), count_list))
 
 
-def make_feature_vector(model, sentence, target_word_index, vector_dimension, merge, min_max, win_size):
+def make_feature_vector(model, sentence, target_word_index, \
+        vector_dimension, merge, min_max, win_size):
     """
     this is wrapper of "make_feature_vector_sum" and "make_feature_vector_concat"
     """
@@ -91,11 +92,12 @@ def make_feature_vector(model, sentence, target_word_index, vector_dimension, me
         return make_feature_vector_concat(model, \
                                 sentence, target_word_index, vector_dimension, min_max, win_size)
     elif merge == 'sum':
-        return make_feature_vector_sum(model,
-                                       sentence, target_word_index, vector_dimension, min_max)
+        return make_feature_vector_sum(model, \
+                                sentence, target_word_index, vector_dimension, min_max, win_size)
 
 
-def make_feature_vector_sum(model, sentence, target_word_index, vector_dimension, min_max):
+def make_feature_vector_sum(model, sentence, target_word_index, \
+        vector_dimension, min_max, win_size):
     """
     Arg:
         model : word embedding model
@@ -103,18 +105,31 @@ def make_feature_vector_sum(model, sentence, target_word_index, vector_dimension
         target_word_index : index of target word in list
         vector_dimension : word embedding dimension
         min_max : if true, concat min_max vector to feature_vector
+        win_size : window size to sum, 0 : sum all words in sentence
     return:
         sum vector of features
     make simple sum vector of all features
     """
+    embedded_words = [(token, index) for index, token in enumerate(
+        sentence) if index == target_word_index or model.get(token) is not None]
+    embedded_words, index_list = zip(*embedded_words)
+    embedded_words = list(embedded_words)
+    index_list = list(index_list)
+
+    bos_list = ["BOS"] * win_size
+    eos_list = ["EOS"] * win_size
+    new_index = index_list.index(target_word_index) + win_size
+    embedded_words = bos_list + embedded_words + eos_list
 
     sum_vector = np.zeros([vector_dimension, ])
     if min_max:
         max_vector = np.zeros([vector_dimension, ])
         min_vector = np.full([vector_dimension, ], np.Inf)
 
-    for index, token in enumerate(sentence):
-        if index == target_word_index:
+    for index, token in enumerate(embedded_words):
+        if (index < new_index - win_size or index > new_index + win_size) and win_size != 0:
+            continue
+        if index == new_index:
             continue
         try:
             sum_vector = sum_vector + model[token]
@@ -132,7 +147,8 @@ def make_feature_vector_sum(model, sentence, target_word_index, vector_dimension
     return sum_vector
 
 
-def make_feature_vector_concat(model, sentence, target_word_index, vector_dimension, min_max, win_size):
+def make_feature_vector_concat(model, sentence, target_word_index, \
+        vector_dimension, min_max, win_size):
     """
     Arg:
         model : word embedding model
@@ -173,7 +189,6 @@ def make_feature_vector_concat(model, sentence, target_word_index, vector_dimens
             if min_max:
                 max_vector = np.fmax(max_vector, model[token])
                 min_vector = np.fmin(min_vector, model[token])
-
         except KeyError:
             pass
 
@@ -227,7 +242,7 @@ def make_glove_bin():
         pickle.dump(glove_model, fw_bin)
 
 
-def build_training_data_for_difficult_word():
+def build_training_data_for_svm():
     """
     build training data dictionary that has key = WORD/POS, value = [(sense, feature vector)]
     It is used to train each svm model
@@ -253,7 +268,7 @@ def build_training_data_for_difficult_word():
                         tokens_for_emb = re.split(
                             '[ ]', re.sub(r'__[\d][\d]', '', line))
                         feature_vector = make_feature_vector(glove_model, tokens_for_emb, \
-                                index, VECTOR_DIMENSION, MERGE, MIN_MAX, HALF_WINDOW_SIZE)
+                                        index, VECTOR_DIMENSION, MERGE, MIN_MAX, HALF_WINDOW_SIZE)
                         if feature_vector is None:
                             continue
                         value = train_dic.get(key, [])
@@ -268,8 +283,9 @@ def build_training_data_for_difficult_word():
 
         LOGGER.info("Building training data done, %s", str(count))
 
-        with open(TRN_DIC, 'wb') as fw_trn_dic:
-            pickle.dump(train_dic, fw_trn_dic)
+        # with open(TRN_DIC, 'wb') as fw_trn_dic:
+        #    pickle.dump(train_dic, fw_trn_dic)
+        return train_dic
 
 
 def build_svm_for_difficult_word():
@@ -279,13 +295,14 @@ def build_svm_for_difficult_word():
     and svm_dic is saved as file "svm_dic.bin"
 
     """
-    with open(TRN_DIC, 'rb') as fr_trn_dic, open(SVM_DIC, 'wb') as fw_svm_dic:
-        train_dic = pickle.load(fr_trn_dic)
+    with open(SVM_DIC, 'wb') as fw_svm_dic: # open(TRN_DIC, 'rb') as fr_trn_dic,
+        #train_dic = pickle.load(fr_trn_dic)
+        train_dic = build_training_data_for_svm()
         count = 0
         svm_dic = {}
         # build svm model for each difficult word
         for key, training_data in train_dic.items():
-            svm_model = svm.LinearSVC()  # TODO: try various svm model.
+            svm_model = svm.LinearSVC()  # todo: try various svm model.
             sense_list, vector_list = zip(*training_data)
             try:
                 svm_model.fit(vector_list, sense_list)
@@ -338,15 +355,15 @@ def main():
     this is main function
     """
 
-    # build_voca()
-    #print("building voca done!")
+    build_voca()
+    print("building voca done!")
 
-    # build_max_freq_dic_and_ent_dic()
-    #print("building max_freq_dic and entropy_dic done!")
+    build_max_freq_dic_and_ent_dic()
+    print("building max_freq_dic and entropy_dic done!")
 
-    # make_glove_bin()
+    make_glove_bin()
 
-    # build_training_data_for_difficult_word()
+    # build_training_data_for_svm()
     build_svm_for_difficult_word()
     print("building svm models done!")
 

@@ -45,8 +45,8 @@ SVM_DIC = os.path.join(THIS_FOLDER, ARGS.svm)
 MFS = ARGS.mfs
 
 # set global variables
-with open(SVM_DIC, 'rb') as fr_svm_dic:
-    META = pickle.load(fr_svm_dic)["META"]
+with open(SVM_DIC, 'rb') as fr_svm:
+    META = pickle.load(fr_svm)["META"]
     VECTOR_DIMENSION = META.dim
     HALF_WINDOW_SIZE = META.win
     MIN_MAX = META.min_max
@@ -63,14 +63,13 @@ STRATEGY_FOR_LOW = 0
 # functions #
 #############
 
-def predict(sentence, index, level, max_freq_dic, ent_dic, svm_dic, glove_model):
+def predict(sentence, index, level, max_freq_dic, svm_dic, glove_model):
     """
     Args:
         sentence : sentence that include target word. all sense numbers should be removed
         index : index of target word
         level : difficulty level of target word (0: low, 1: high)
         max_freq_dic : max_freq_dic
-        ent_dic : entropy_dic
         svm_dic : svm_dic
         glove_model : glove_model
 
@@ -137,7 +136,7 @@ def evaluate():
                         checked_words.add(key)
                         answer_word = predict(re.split(
                             '[ ]', re.sub(r'__[\d][\d]', '', test_line)), \
-                            index, STRATEGY_FOR_HIGH, max_freq_dic, ent_dic, svm_dic, glove_model)
+                            index, STRATEGY_FOR_HIGH, max_freq_dic, svm_dic, glove_model)
                         if token == answer_word:
                             correct = correct + 1
 
