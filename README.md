@@ -12,8 +12,14 @@ Word Sense Disambiguation
     
 ## Glove word embedding model 준비
 1. 워드 임베딩 학습을 위한 코퍼스를 준비합니다. (ex. KOMORAN 형태소 분석기를 거친 한국어 위키덤프 코퍼스)  
-2. [glove 사용법](https://github.com/kakaonlp-internship2018/wsd/blob/feature/3/entropy_multi_model/glove/README.md)에 따라 워드임베딩 모델을 학습합니다. vectors.txt 파일로 결과가 저장됩니다.  
-3. vectors.txt 파일을 glove/vectors.txt 경로에 준비합니다.  
+2. [glove 사용법](https://github.com/stanfordnlp/GloVe)에 따라 워드임베딩 모델을 학습합니다. vectors.txt 파일로 결과가 저장됩니다. 
+    ~~~
+    $ git clone http://github.com/stanfordnlp/glove
+    $ cd glove && make
+    $ ./demo.sh 
+    ~~~
+이때 demo.sh의 CORPUS 부분을 수정하여 준비한 코퍼스 경로를 입력해줍니다.
+3. 생성된 vectors.txt 파일을 glove/vectors.txt 경로에 준비합니다.  
 
 ## Baseline 측정법
 1. /baseline 디렉토리의 baseline.py 를 이용해 MFS 사전을 구축하고 테스트 코퍼스에 대해 중의성 해소 후 정확도를 측정합니다.
