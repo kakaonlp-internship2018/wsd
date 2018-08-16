@@ -83,24 +83,24 @@ def calculate_entropy(count_list):
     return sum(map(lambda y: -y/sum(count_list)*np.log2(y/sum(count_list)), count_list))
 
 
-def make_feature_vector(model, sentence, target_word_index, \
+def make_feature_vector(glove_model, sentence, target_word_index, \
         vector_dimension, merge, min_max, win_size):
     """
     this is wrapper of "make_feature_vector_sum" and "make_feature_vector_concat"
     """
     if merge == 'concat':
-        return make_feature_vector_concat(model, \
+        return make_feature_vector_concat(glove_model, \
                                 sentence, target_word_index, vector_dimension, min_max, win_size)
     elif merge == 'sum':
-        return make_feature_vector_sum(model, \
+        return make_feature_vector_sum(glove_model, \
                                 sentence, target_word_index, vector_dimension, min_max, win_size)
 
 
-def make_feature_vector_sum(model, sentence, target_word_index, \
+def make_feature_vector_sum(glove_model, sentence, target_word_index, \
         vector_dimension, min_max, win_size):
     """
     Arg:
-        model : word embedding model
+        glove_model : word embedding model
         sentence : word(WORD/POS) list
         target_word_index : index of target word in list
         vector_dimension : word embedding dimension
@@ -117,7 +117,7 @@ def make_feature_vector_sum(model, sentence, target_word_index, \
     embedded_words = []
     index_list = []
     for index, token in enumerate(sentence):
-        if index == target_word_index or model.get(token) is not None:
+        if index == target_word_index or glove_model.get(token) is not None:
             embedded_words.append(token)
             index_list.append(index)
 
@@ -137,10 +137,10 @@ def make_feature_vector_sum(model, sentence, target_word_index, \
         if index == new_index:
             continue
         try:
-            sum_vector = sum_vector + model[token]
+            sum_vector = sum_vector + glove_model[token]
             if min_max:
-                max_vector = np.fmax(max_vector, model[token])
-                min_vector = np.fmin(min_vector, model[token])
+                max_vector = np.fmax(max_vector, glove_model[token])
+                min_vector = np.fmin(min_vector, glove_model[token])
         except KeyError:
             pass
 
@@ -152,11 +152,11 @@ def make_feature_vector_sum(model, sentence, target_word_index, \
     return sum_vector
 
 
-def make_feature_vector_concat(model, sentence, target_word_index, \
+def make_feature_vector_concat(glove_model, sentence, target_word_index, \
         vector_dimension, min_max, win_size):
     """
     Arg:
-        model : word embedding model
+        glove_model : word embedding model
         sentence : word(WORD/POS) list
         target_word_index : index of target word in list
         vector_dimension : word embedding dimension
@@ -175,7 +175,7 @@ def make_feature_vector_concat(model, sentence, target_word_index, \
     embedded_words = []
     index_list = []
     for index, token in enumerate(sentence):
-        if index == target_word_index or model.get(token) is not None:
+        if index == target_word_index or glove_model.get(token) is not None:
             embedded_words.append(token)
             index_list.append(index)
 
@@ -195,10 +195,10 @@ def make_feature_vector_concat(model, sentence, target_word_index, \
         if index == new_index:
             continue
         try:
-            concat_vector = concat_vector + model[token]
+            concat_vector = concat_vector + glove_model[token]
             if min_max:
-                max_vector = np.fmax(max_vector, model[token])
-                min_vector = np.fmin(min_vector, model[token])
+                max_vector = np.fmax(max_vector, glove_model[token])
+                min_vector = np.fmin(min_vector, glove_model[token])
         except KeyError:
             pass
 
