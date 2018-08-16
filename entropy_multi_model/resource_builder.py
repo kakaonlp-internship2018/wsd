@@ -110,11 +110,16 @@ def make_feature_vector_sum(model, sentence, target_word_index, \
         sum vector of features
     make simple sum vector of all features
     """
-    embedded_words = [(token, index) for index, token in enumerate(
-        sentence) if index == target_word_index or model.get(token) is not None]
-    embedded_words, index_list = zip(*embedded_words)
-    embedded_words = list(embedded_words)
-    index_list = list(index_list)
+
+    # this can be simplified by applying <unk> embedding for express unknown word.
+    # the code below exclude all unknown word in making feature vector.
+
+    embedded_words = []
+    index_list = []
+    for index, token in enumerate(sentence):
+        if index == target_word_index or model.get(token) is not None:
+            embedded_words.append(token)
+            index_list.append(index)
 
     bos_list = ["BOS"] * win_size
     eos_list = ["EOS"] * win_size
@@ -163,11 +168,16 @@ def make_feature_vector_concat(model, sentence, target_word_index, \
 
     make simple concat vector of all features
     """
-    embedded_words = [(token, index) for index, token in enumerate(
-        sentence) if index == target_word_index or model.get(token) is not None]
-    embedded_words, index_list = zip(*embedded_words)
-    embedded_words = list(embedded_words)
-    index_list = list(index_list)
+
+    # this can be simplified by applying <unk> embedding for express unknown word.
+    # the code below exclude all unknown word in making feature vector.
+
+    embedded_words = []
+    index_list = []
+    for index, token in enumerate(sentence):
+        if index == target_word_index or model.get(token) is not None:
+            embedded_words.append(token)
+            index_list.append(index)
 
     bos_list = ["BOS"] * win_size
     eos_list = ["EOS"] * win_size
