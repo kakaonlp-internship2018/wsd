@@ -14,6 +14,8 @@ import os
 import logging
 import argparse
 
+import numpy as np
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -51,7 +53,8 @@ if __name__ == '__main__':
     EMBEDDING_DIM = ARGS.dim
     TARGET_WORD = ARGS.target
     HIDDEN_DIM = 100
-    EPOCHS = 10
+    EPOCHS = 20
+    BATCH_SIZE = 50
 
 #############
 #   class   #
@@ -63,12 +66,34 @@ class MyLSTM(nn.Module):
     My Bi-LSTM class.
     """
 
-    def __init__(self, embedding_dim, hidden_dim, output_size):
+    def __init__(self, embedding_dim, hidden_dim, output_size, batch_size):
         super(MyLSTM, self).__init__()
-        with open(VECTORS, 'rb') as fr_vectors:
-            self.word_embeddings = pickle.load(fr_vectors)
 
-        self.unknown_emb = self.word_embeddings["<unk>"]
+        # init embedding layer
+        with open(VECTORS, 'rb') as fr_vectors:
+            glove = pickle.load(fr_vectors)
+
+            # index of <unk> = 0, index of <pad> = 1
+            key_list = ["<unk>"]+["<pad>"]+list(glove.keys())
+            padding_idx = 1
+
+            # key = word, value = index
+            self.index_dic = make_index_dic(key_list)
+
+            matrix_len = len(self.index_dic)
+            w_matrix = np.zeros((matrix_len, embedding_dim))
+            for key, value in self.index_dic.items():
+                if value == padding_idx:
+                    continue
+                w_matrix[value] = glove[key]
+
+            self.emb_layer = nn.Embedding(matrix_len, embedding_dim, padding_idx=padding_idx)
+            # initialize weight as pretrained glove model
+            self.emb_layer.load_state_dict({'weight': torch.FloatTensor(w_matrix)})
+            # glove emb_layer must not be trained.
+            self.emb_layer.weight.requires_grad = False
+
+        self.batch_size = batch_size
 
         self.bi_lstm = nn.LSTM(embedding_dim, hidden_dim, bidirectional=True)
         self.hidden_dim = hidden_dim
@@ -80,22 +105,24 @@ class MyLSTM(nn.Module):
         initialize hidden states
         """
         return (torch.zeros(2, 1, self.hidden_dim), torch.zeros(2, 1, self.hidden_dim))
+        # initial value should be zeros? what about randn?
 
     # input sentence should be formed like "BOS My/POS name/POS is/POS jeff/POS EOS"
-    def sentence_to_embeds(self, sentence):
+    def sentence_to_index(self, sentence):
         """
         Args:
             sentence: word list, containing target word,
                 formed like "BOS My/POS name/POS is/POS jeff/POS EOS"
         Returns:
-            tensor of embedding vectors list
+            index list
         """
 
         result = []
         for word in sentence:
-            result.append(self.word_embeddings.get(word, self.unknown_emb))
+            result.append(self.index_dic.get(word, 0))
+            # if there no word in dictionary, its index is 0 (unk)
 
-        return torch.FloatTensor(result)
+        return torch.LongTensor(result)
 
     def forward(self, sentence, target_index):
         """
@@ -107,7 +134,8 @@ class MyLSTM(nn.Module):
         Returns:
             top level output vector of the model, dimension = the number of sense(class)
         """
-        embeds = self.sentence_to_embeds(sentence)
+        index_list = self.sentence_to_index(sentence)
+        embeds = self.emb_layer(index_list)
         bi_lstm_out, self.hidden = self.bi_lstm(
             embeds.view(len(embeds), 1, -1), self.hidden)
         sense_space = self.fcl(bi_lstm_out.view(len(embeds), -1))
@@ -148,7 +176,7 @@ def make_one_hot_vectors(input_list):
 
     return result
 
-
+# maybe not used
 def make_index_list(input_list):
     """
     Args:
@@ -292,7 +320,11 @@ def evaluate(model, test_set):
                 correct = correct + 1
 
     print(total, "instances were tested,", correct, "answers were correct")
-    print("Accuracy: ", (correct/total) * 100, "%")
+    try:
+        print("Accuracy: ", (correct/total) * 100, "%")
+    except ZeroDivisionError:
+        print("Accuracy: 0.0 %")
+
 
 
 def main():
@@ -312,9 +344,10 @@ def main():
         zip(single_word_trn_set, answer_set, target_index_list))
 
     # define model
-    model = MyLSTM(EMBEDDING_DIM, HIDDEN_DIM, how_many_senses)
+    model = MyLSTM(EMBEDDING_DIM, HIDDEN_DIM, how_many_senses, BATCH_SIZE)
     loss_function = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters())
+
 
     # train model
     train(model, EPOCHS, loss_function, optimizer, training_set, print_count=2)
