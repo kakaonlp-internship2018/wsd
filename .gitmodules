@@ -1,0 +1,3 @@
+[submodule "entropy_multi_model/GloVe"]
+	path = entropy_multi_model/GloVe
+	url = https://github.com/stanfordnlp/GloVe

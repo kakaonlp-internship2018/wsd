@@ -39,6 +39,25 @@ except BaseException:
 # functions #
 #############
 
+def build_voca_with_freq_dic():
+    """
+    voca : key = word_without_sense, value = freq_dic
+    freq_dic : key = sense_number, value = appearing count
+    """
+    vocabulary = {}
+    with open(TRAIN_SET, 'r') as fr_train, open(VOCA, 'wb') as fw_voca:
+        for line in fr_train:
+            line = line.replace("\n", "")
+            new_tokens = re.split('[ ]', line)
+            for token in new_tokens:
+                if TKN_PTN.match(token):
+                    key = re.sub(r'__[\d][\d]', '', token)
+                    sense_number = token[token.index("/")-2:token.index("/")]
+                    freq_dic = vocabulary.get(key, {})
+                    freq_dic[sense_number] = freq_dic.get(sense_number, 0) + 1
+                    vocabulary[key] = freq_dic
+        pickle.dump(vocabulary, fw_voca)
+
 def build_voca():
     """
     Function that build homograph vocabulary from training set
@@ -60,6 +79,22 @@ def build_voca():
 
         pickle.dump(vocabulary, fw_voca)
 
+def build_max_freq_dic2():
+    """
+    another version of build_max_freq_dic function
+    It uses build_voca_with_freq_dic()
+    """
+    with open(VOCA, 'rb') as fr_voca, open(MAX_FREQ_DIC, 'wb') as fw_max_freq_dic:
+        vocabulary = pickle.load(fr_voca)
+        print(len(vocabulary))
+        max_freq_dic = {}
+        for key, freq_dic in vocabulary.items():
+            max_freq_dic[key] \
+            = key[:key.index("/")] + "__" + max(freq_dic, key=freq_dic.get) + key[key.index("/"):]
+
+        pickle.dump(max_freq_dic, fw_max_freq_dic)
+
+
 
 def build_max_freq_dic():
     """
@@ -74,6 +109,8 @@ def build_max_freq_dic():
         keys = vocabulary.keys()
         keys_without_sense = set(map(lambda y: re.sub(r'__[\d][\d]', '', y), keys))
         max_freq_dic = {}
+
+
         for key in keys_without_sense:
             split_key = re.split('/', key)
             word = split_key[0]
@@ -163,10 +200,12 @@ def main():
     this is main function
     """
 
-    build_voca()
-    print("building voca done!")
+    #build_voca()
+    #build_voca_with_freq_dic()
+    #print("building voca done!")
 
-    build_max_freq_dic()
+    #build_max_freq_dic()
+    build_max_freq_dic2()
     print("building max_freq_dic done!")
 
     make_answer()
