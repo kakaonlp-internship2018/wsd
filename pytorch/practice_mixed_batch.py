@@ -40,8 +40,8 @@ if __name__ == '__main__':
                         help='Set epoch size, default=300')
     PARSER.add_argument('--patience', type=int, default=10,
                         help='Set patience, default=10')
-    #PARSER.add_argument('--target', type=str, default='관/NNG',
-    #                    help='Specify target word for disambiguation, default=관/NNG')
+    PARSER.add_argument('--target', type=str, default=None,
+                        help='Specify target word for disambiguation, default=None')
     PARSER.add_argument('--result', type=str, default='result.bin',
                         help='Specify result file name, default=result.bin')
     PARSER.add_argument('--gpu', type=int, default=0,
@@ -66,7 +66,7 @@ if __name__ == '__main__':
     TRAIN_SET = ARGS.TRAIN_SET
     TEST_SET = ARGS.TEST_SET
     EMBEDDING_DIM = ARGS.dim
-    #TARGET_WORD = ARGS.target
+    SINGLE_TARGET_WORD = ARGS.target
     RELU = ARGS.relu
     DROPOUT = ARGS.dropout
     GPU = ARGS.gpu
@@ -416,6 +416,7 @@ def train(model, epochs, loss_function, training_data, validating_data, glove_in
         model trained
     """
     bad_epoch_count = 0
+    #best_validation_loss = math.inf
     best_validation_acc = 0
     train_loss, validation_loss, train_acc, validation_acc = 0, 0, 0, 0
     for epoch in range(1, epochs+1):
@@ -426,8 +427,12 @@ def train(model, epochs, loss_function, training_data, validating_data, glove_in
             print("epoch: ", epoch, "train_acc: ", train_acc)
             print("epoch: ", epoch, "validate_acc: ", validation_acc)
             return
-        current_loss = 0
+
         ### training part
+        model.train()
+        train_current_loss = 0
+        train_correct = 0
+        train_total = len(training_data)
         for batch_index in range(0, math.ceil(len(training_data)/BATCH_SIZE)):
             start = batch_index*BATCH_SIZE
             end = min(start+BATCH_SIZE, len(training_data))
@@ -453,12 +458,15 @@ def train(model, epochs, loss_function, training_data, validating_data, glove_in
             for batch_index_inner in range(batch_size):
                 score = scores[batch_index_inner]
                 score = score.view(1, -1)
+                _, prediction = torch.max(score, 1)
                 answer = batch_answers[batch_index_inner]
+                if prediction.item() == answer:
+                    train_correct = train_correct+1
                 answer = set_device(torch.tensor(answer).view(1))
                 unit_loss_list.append(loss_function(score, answer))
 
             loss = sum(unit_loss_list)
-            current_loss = current_loss + loss.item()
+            train_current_loss = train_current_loss + loss.item()
 
             # super important part
             # model.parameters change every batch.
@@ -468,8 +476,14 @@ def train(model, epochs, loss_function, training_data, validating_data, glove_in
             loss.backward()
             optimizer.step()
 
+        train_loss = train_current_loss/(batch_index+1)
+        train_acc = (train_correct/train_total)*100
+
         ### validation part
-        validation_loss = 0
+        model.eval()
+        validation_current_loss = 0
+        validation_correct = 0
+        validation_total = len(validating_data)
         for batch_index in range(0, math.ceil(len(validating_data)/BATCH_SIZE)):
             start = batch_index*BATCH_SIZE
             end = min(start+BATCH_SIZE, len(training_data))
@@ -497,16 +511,17 @@ def train(model, epochs, loss_function, training_data, validating_data, glove_in
                 for batch_index_inner in range(batch_size):
                     score = scores[batch_index_inner]
                     score = score.view(1, -1)
+                    _, prediction = torch.max(score, 1)
                     answer = batch_answers[batch_index_inner]
+                    if prediction.item() == answer:
+                        validation_correct = validation_correct+1
                     answer = set_device(torch.tensor(answer).view(1))
                     unit_loss_list.append(loss_function(score, answer))
 
-                validation_loss = validation_loss + sum(unit_loss_list).item()
+                validation_current_loss = validation_current_loss + sum(unit_loss_list).item()
 
-        # get stuffs for plotting and early stopping
-        train_acc = evaluate(model, training_data, glove_index_dic, False)
-        validation_acc = evaluate(model, validating_data, glove_index_dic, False)
-        train_loss = current_loss
+        validation_loss = validation_current_loss/(batch_index+1)
+        validation_acc = (validation_correct/validation_total)*100
 
         if epoch % print_count == 0:
             print("epoch: ", epoch, "train_loss: ", train_loss)
@@ -519,12 +534,14 @@ def train(model, epochs, loss_function, training_data, validating_data, glove_in
         LOGGER.scalar_summary('validate_loss', validation_loss, epoch)
         LOGGER.scalar_summary('validate_acc', validation_acc, epoch)
 
+        #if best_validation_loss < validation_loss:
         if best_validation_acc > validation_acc:
             bad_epoch_count = bad_epoch_count + 1
         else:
+            # TODO: 매 베스트마다 체크포인트 만들고 ㄱ모델 저장, 훈련끄탄고 가장 validate acc이 높았던 모델 가져오기:w
+            # TODO: learning rate decay
             best_validation_acc = validation_acc
             bad_epoch_count = 0
-
 
 
 def evaluate(model, test_data, glove_index_dic, print_result=True):
@@ -538,8 +555,11 @@ def evaluate(model, test_data, glove_index_dic, print_result=True):
         return accuracy
         prints result of evaluation
     """
+    model.eval()
     with torch.no_grad():
-        # test data can be made full batch
+        # test data can be made full batch? 
+        # !!!! no, gpu will be gone if batch size is tooooo big
+        # but so far, it is okay. :)
         target_total_dic = {}
         target_correct_dic = {}
 
@@ -694,13 +714,16 @@ def filter_top_nword(training_data, validation_data, test_data):
         filtered data sets (only contains entropy top nword)
     """
     with open(ENTROPY_DIC, 'rb') as fr_ent:
-        ent_dic = pickle.load(fr_ent)
-        item_list = list(ent_dic.items())
-        item_list.sort(key=lambda y: y[1], reverse=True)
-        # y[1] = entropy of word
-        ent_rank, _ = zip(*item_list)
-        # ent_rank: WORD/POS list
-        ent_rank = ent_rank[0:min(len(ent_rank), NWORD)]
+        if SINGLE_TARGET_WORD:
+            ent_rank = [SINGLE_TARGET_WORD]
+        else:
+            ent_dic = pickle.load(fr_ent)
+            item_list = list(ent_dic.items())
+            item_list.sort(key=lambda y: y[1], reverse=True)
+            # y[1] = entropy of word
+            ent_rank, _ = zip(*item_list)
+            # ent_rank: WORD/POS list
+            ent_rank = ent_rank[0:min(len(ent_rank), NWORD)]
 
         # y[3] = target_word
         training_data = list(filter(lambda y: y[3] in ent_rank, training_data))
