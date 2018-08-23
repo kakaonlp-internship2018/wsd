@@ -62,7 +62,8 @@ if __name__ == '__main__':
                         help='Print every target word accuracy, default=True')
     PARSER.add_argument('--data', dest='build_data_set', action='store_true', default=False,
                         help='Build data set, default=False')
-
+    PARSER.add_argument('--nword', type=int, default=-1,
+                        help='the number of target word, default=-1')
 
     ARGS = PARSER.parse_args()
 
@@ -81,6 +82,7 @@ if __name__ == '__main__':
     EARLY = ARGS.early
     RESULT = ARGS.result
     BUILD_DATA_SET = ARGS.build_data_set
+    NWORD = ARGS.nword
     HIDDEN_DIM = 128
     HIDDEN2_DIM = 64
     ENTROPY_THRESHOLD = 0.1
@@ -649,9 +651,9 @@ def build_all_data_set():
     """
     with open(ENTROPY_DIC, 'rb') as fr_ent, open(DATA_SET, 'wb') as fw_result:
         ent_dic = pickle.load(fr_ent)
-        target_word_list = ["관/NNG", "원/NNG", "감수/NNG", "정수/NNG", "거사/NNG",
-                           "유/NNP", "국/NNG", "표시/NNG", "배출되/VV"]
-        #target_word_list = [k for k, v in ent_dic.items() if v >= ENTROPY_THRESHOLD]
+        #target_word_list = ["관/NNG", "원/NNG", "감수/NNG", "정수/NNG", "거사/NNG",
+        #                   "유/NNP", "국/NNG", "표시/NNG", "배출되/VV"]
+        target_word_list = [k for k, v in ent_dic.items() if v >= ENTROPY_THRESHOLD]
 
         # prepare resources for training
         training_data, answer_index_dic = build_data_set(target_word_list, TRAIN_SET)
@@ -680,6 +682,30 @@ def build_all_data_set():
 
     return training_data, validation_data, test_data, sense_len_dic
 
+def filter_top_nword(training_data, validation_data, test_data):
+    """
+    Args:
+        data sets
+    Returns:
+        filtered data sets (only contains entropy top nword)
+    """
+    with open(ENTROPY_DIC, 'rb') as fr_ent:
+        ent_dic = pickle.load(fr_ent)
+        item_list = list(ent_dic.items())
+        item_list.sort(key=lambda y: y[1], reverse=True)
+        # y[1] = entropy of word
+        ent_rank, _ = zip(*item_list)
+        # ent_rank: WORD/POS list
+        ent_rank = ent_rank[0:min(len(ent_rank), NWORD)]
+
+        # y[3] = target_word
+        training_data = list(filter(lambda y: y[3] in ent_rank, training_data))
+        validation_data = list(filter(lambda y: y[3] in ent_rank, validation_data))
+        test_data = list(filter(lambda y: y[3] in ent_rank, test_data))
+
+        return training_data, validation_data, test_data
+
+
 def main():
     """
     this is main function
@@ -693,6 +719,10 @@ def main():
             validation_data = data_set['val']
             test_data = data_set['test']
             sense_len_dic = data_set['sense']
+
+    if NWORD != -1:
+        training_data, validation_data, test_data = filter_top_nword(training_data,
+                                                                     validation_data, test_data)
 
     #### training part ####
     # define model
