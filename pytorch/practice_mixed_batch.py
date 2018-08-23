@@ -434,6 +434,8 @@ def train(model, epochs, loss_function, training_data, validating_data, glove_in
         train_correct = 0
         train_total = len(training_data)
         for batch_index in range(0, math.ceil(len(training_data)/BATCH_SIZE)):
+            if batch_index % 50 == 0:
+                print(epoch, "th epoch,", batch_index, "th training iteration start.")
             start = batch_index*BATCH_SIZE
             end = min(start+BATCH_SIZE, len(training_data))
             data_for_batch = training_data[start:end]
@@ -618,6 +620,7 @@ def evaluate(model, test_data, glove_index_dic, print_result=True):
                 acc_result['TOTAL'] = (correct,
                                        total,
                                        (correct/total)*100)
+                acc_result['META'] = ARGS
                 pickle.dump(acc_result, fw_result)
 
     return (correct/total) * 100
@@ -747,7 +750,7 @@ def main():
             test_data = data_set['test']
             sense_len_dic = data_set['sense']
 
-    if NWORD != -1:
+    if NWORD != -1 or SINGLE_TARGET_WORD:
         training_data, validation_data, test_data = filter_top_nword(training_data,
                                                                      validation_data, test_data)
 
