@@ -11,7 +11,7 @@ import re
 import sys
 import pickle
 import os
-import logging
+from logger import Logger
 import argparse
 import math
 import numpy as np
@@ -25,12 +25,6 @@ import torch.optim as optim
 if __name__ == '__main__':
     # define regex pattern
     TKN_PTN = re.compile(r'.*__[\d][\d].*')
-
-    # define LOGGER
-    PROGRAM = os.path.basename(sys.argv[0])
-    LOGGER = logging.getLogger(PROGRAM)
-    logging.basicConfig(format='%(asctime)s: %(levelname)s: %(message)s')
-    logging.root.setLevel(level=logging.INFO)
 
     # define argparser
     PARSER = argparse.ArgumentParser(description='This is resource builder.')
@@ -64,7 +58,8 @@ if __name__ == '__main__':
                         help='Build data set, default=False')
     PARSER.add_argument('--nword', type=int, default=-1,
                         help='the number of target word, default=-1')
-
+    PARSER.add_argument('--exp', type=str, default='logs',
+                        help='name of experiment, log directory name, default=logs')
     ARGS = PARSER.parse_args()
 
     # set global variables
@@ -83,9 +78,13 @@ if __name__ == '__main__':
     RESULT = ARGS.result
     BUILD_DATA_SET = ARGS.build_data_set
     NWORD = ARGS.nword
+    EXP_NAME = ARGS.exp
     HIDDEN_DIM = 128
     HIDDEN2_DIM = 64
     ENTROPY_THRESHOLD = 0.1
+
+# define LOGGER
+    LOGGER = Logger('./'+EXP_NAME)
 
     # FILE PATH #
     THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
@@ -514,6 +513,11 @@ def train(model, epochs, loss_function, training_data, validating_data, glove_in
             print("epoch: ", epoch, "validate_loss: ", validation_loss)
             print("epoch: ", epoch, "train_acc: ", train_acc)
             print("epoch: ", epoch, "validate_acc: ", validation_acc)
+
+        LOGGER.scalar_summary('train_loss', train_loss, epoch)
+        LOGGER.scalar_summary('train_acc', train_acc, epoch)
+        LOGGER.scalar_summary('validate_loss', validation_loss, epoch)
+        LOGGER.scalar_summary('validate_acc', validation_acc, epoch)
 
         if best_validation_acc > validation_acc:
             bad_epoch_count = bad_epoch_count + 1
