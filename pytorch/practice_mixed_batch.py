@@ -57,12 +57,16 @@ if __name__ == '__main__':
                         help='Build data set, default=False')
     PARSER.add_argument('--nword', type=int, default=-1,
                         help='the number of target word, default=-1')
+    PARSER.add_argument('--win', type=int, default=-1,
+                        help='window_size, default=-1')
     PARSER.add_argument('--exp', type=str, default='temp_experiment',
                         help='name of experiment, default=temp_experiment')
     PARSER.add_argument('--check', dest='check', action='store_true', default=False,
                         help='Check result, default=False')
     PARSER.add_argument('--best', dest='best', action='store_true', default=False,
                         help='User model that has best validation acc to evaluate, default=False')
+    PARSER.add_argument('--weak', type=int, default=-1,
+                        help='set weakness, default=-1')    
     ARGS = PARSER.parse_args()
 
     # set global variables
@@ -81,8 +85,10 @@ if __name__ == '__main__':
     EARLY = ARGS.early
     BUILD_DATA_SET = ARGS.build_data_set
     NWORD = ARGS.nword
+    WINDOW_SIZE = ARGS.win
     EXP_NAME = ARGS.exp
     CHECK = ARGS.check
+    WEAK = ARGS.weak
     HIDDEN_DIM = 128
     HIDDEN2_DIM = 64
     ENTROPY_THRESHOLD = 0.1
@@ -96,6 +102,7 @@ if __name__ == '__main__':
     VECTORS = os.path.join(THIS_FOLDER, 'vectors.bin')
     ENTROPY_DIC = os.path.join(THIS_FOLDER, 'entropy_dic.bin')
     DATA_SET = os.path.join(THIS_FOLDER, 'data_set.bin')
+    VOCA = os.path.join(THIS_FOLDER, 'voca.bin')
     RESULT_FILE = os.path.join(THIS_FOLDER, 'results/'+EXP_NAME+'.bin')
 
 
@@ -115,7 +122,7 @@ class MyLSTM(nn.Module):
         # initialize layers
         self.embedding_dim = embedding_dim
         self.init_emb()
-        self.bi_lstm = nn.LSTM(embedding_dim, hidden_dim, num_layers=2, bidirectional=True)
+        self.bi_lstm = nn.LSTM(embedding_dim, hidden_dim, num_layers=2, bidirectional=True, batch_first=True)
         self.hidden_dim = hidden_dim
         self.hidden2_dim = hidden2_dim
         self.hidden = self.init_hidden(1)
@@ -212,15 +219,19 @@ class MyLSTM(nn.Module):
         embeds = self.emb_layer(batch)
 
         # pack input to make padding hidden in lstm
-        packed_embeds = torch.nn.utils.rnn.pack_padded_sequence(embeds, length_list,
-                                                                batch_first=True)
+        if WINDOW_SIZE == -1:
+            packed_embeds = torch.nn.utils.rnn.pack_padded_sequence(embeds, length_list,
+                                                                    batch_first=True)
 
-        # (batch_size, seq_len, embedding_dim) -> (batch_size, seq_len, hidden_dim*2)
-        packed_bi_lstm_out, self.hidden = self.bi_lstm(packed_embeds, self.hidden)
+            # (batch_size, seq_len, embedding_dim) -> (batch_size, seq_len, hidden_dim*2)
+            packed_bi_lstm_out, self.hidden = self.bi_lstm(packed_embeds, self.hidden)
 
-        # undo the packing operation
-        bi_lstm_out, _ = torch.nn.utils.rnn.pad_packed_sequence(packed_bi_lstm_out,
-                                                                batch_first=True)
+            # undo the packing operation
+            bi_lstm_out, _ = torch.nn.utils.rnn.pad_packed_sequence(packed_bi_lstm_out,
+                                                                    batch_first=True)
+        else:
+            bi_lstm_out, _ = self.bi_lstm(embeds, self.hidden)
+
         # for memory arrangement
         bi_lstm_out = bi_lstm_out.contiguous()
 
@@ -354,6 +365,14 @@ def build_data_set(target_word_list, path, answer_index_dic={}):
                     answer = get_sense_number(token)
                     target_index = index+1 # +1: BOS index
                     data = (sentence, answer, target_index, target_word)
+
+                    if WINDOW_SIZE > -1:
+                        sentence = (['BOS']*WINDOW_SIZE)+line_without_sense+(['EOS']*WINDOW_SIZE)
+                        new_index = index + WINDOW_SIZE
+                        sentence = sentence[new_index-WINDOW_SIZE:new_index+WINDOW_SIZE+1]
+                        target_index = new_index
+                        data = (sentence, answer, target_index, target_word)
+
                     # collect answers for each target_word
                     str_answer_list = answer_set_dic.get(target_word, [])
                     str_answer_list.append(answer)
@@ -424,7 +443,7 @@ def train(model, epochs, loss_function, training_data, validating_data, glove_in
     best_model = None
     best_epoch = 0
     bad_epoch_count = 0
-    #best_validation_loss = math.inf
+    best_validation_loss = math.inf
     best_validation_acc = 0
     train_loss, validation_loss, train_acc, validation_acc = 0, 0, 0, 0
     for epoch in range(1, epochs+1):
@@ -441,6 +460,7 @@ def train(model, epochs, loss_function, training_data, validating_data, glove_in
         train_current_loss = 0
         train_correct = 0
         train_total = len(training_data)
+        batch_index = 0
         for batch_index in range(0, math.ceil(len(training_data)/BATCH_SIZE)):
             start = batch_index*BATCH_SIZE
             end = min(start+BATCH_SIZE, len(training_data))
@@ -492,6 +512,7 @@ def train(model, epochs, loss_function, training_data, validating_data, glove_in
         validation_current_loss = 0
         validation_correct = 0
         validation_total = len(validating_data)
+        batch_index = 0
         for batch_index in range(0, math.ceil(len(validating_data)/BATCH_SIZE)):
             start = batch_index*BATCH_SIZE
             end = min(start+BATCH_SIZE, len(training_data))
@@ -542,10 +563,11 @@ def train(model, epochs, loss_function, training_data, validating_data, glove_in
         LOGGER.scalar_summary('validate_loss', validation_loss, epoch)
         LOGGER.scalar_summary('validate_acc', validation_acc, epoch)
 
-        if best_validation_acc > validation_acc:
+        if best_validation_acc > validation_acc or (best_validation_acc == validation_acc and best_validation_loss < validation_loss):
             bad_epoch_count = bad_epoch_count + 1
         else:
             best_validation_acc = validation_acc
+            best_validation_loss = validation_loss
             bad_epoch_count = 0
             best_epoch = epoch
             best_model = copy.deepcopy(model)
@@ -723,7 +745,7 @@ def filter_top_nword(training_data, validation_data, test_data):
     Returns:
         filtered data sets (only contains entropy top nword)
     """
-    with open(ENTROPY_DIC, 'rb') as fr_ent:
+    with open(ENTROPY_DIC, 'rb') as fr_ent, open(VOCA, 'rb') as fr_voca:
         if SINGLE_TARGET_WORD:
             ent_rank = [SINGLE_TARGET_WORD]
         else:
@@ -734,12 +756,18 @@ def filter_top_nword(training_data, validation_data, test_data):
             ent_rank, _ = zip(*item_list)
             # ent_rank: WORD/POS list
             ent_rank = ent_rank[0:min(len(ent_rank), NWORD)]
+        
+        if WEAK != -1:
+            voca = pickle.load(fr_voca)
+            ent_rank = list(filter(lambda y: sum(list(voca[y].values())) <= WEAK, ent_rank))
+
+        print("target weak words:", ent_rank, len(ent_rank))
 
         # y[3] = target_word
-        training_data = list(filter(lambda y: y[3] in ent_rank, training_data))
+        training_data = list(filter(lambda x: x[3] in ent_rank, training_data))
         validation_data = list(filter(lambda y: y[3] in ent_rank, validation_data))
         test_data = list(filter(lambda y: y[3] in ent_rank, test_data))
-
+    
         return training_data, validation_data, test_data
 
 def print_result():
