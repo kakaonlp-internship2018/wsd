@@ -15,6 +15,7 @@ from logger import Logger
 import argparse
 import math
 import numpy as np
+import copy
 
 import torch
 import torch.nn as nn
@@ -42,8 +43,6 @@ if __name__ == '__main__':
                         help='Set patience, default=10')
     PARSER.add_argument('--target', type=str, default=None,
                         help='Specify target word for disambiguation, default=None')
-    PARSER.add_argument('--result', type=str, default='result.bin',
-                        help='Specify result file name, default=result.bin')
     PARSER.add_argument('--gpu', type=int, default=0,
                         help='select GPU device, default=0')
     PARSER.add_argument('--relu', dest='relu', action='store_true', default=False,
@@ -58,8 +57,12 @@ if __name__ == '__main__':
                         help='Build data set, default=False')
     PARSER.add_argument('--nword', type=int, default=-1,
                         help='the number of target word, default=-1')
-    PARSER.add_argument('--exp', type=str, default='logs',
-                        help='name of experiment, log directory name, default=logs')
+    PARSER.add_argument('--exp', type=str, default='temp_experiment',
+                        help='name of experiment, default=temp_experiment')
+    PARSER.add_argument('--check', dest='check', action='store_true', default=False,
+                        help='Check result, default=False')
+    PARSER.add_argument('--best', dest='best', action='store_true', default=False,
+                        help='User model that has best validation acc to evaluate, default=False')
     ARGS = PARSER.parse_args()
 
     # set global variables
@@ -71,27 +74,29 @@ if __name__ == '__main__':
     DROPOUT = ARGS.dropout
     GPU = ARGS.gpu
     BATCH_SIZE = ARGS.batch
+    BEST = ARGS.best
     VERBOSE = ARGS.verbose
     EPOCHS = ARGS.epoch
     PATIENCE = ARGS.patience
     EARLY = ARGS.early
-    RESULT = ARGS.result
     BUILD_DATA_SET = ARGS.build_data_set
     NWORD = ARGS.nword
     EXP_NAME = ARGS.exp
+    CHECK = ARGS.check
     HIDDEN_DIM = 128
     HIDDEN2_DIM = 64
     ENTROPY_THRESHOLD = 0.1
+    os.environ['CUDA_VISIBLE_DEVICES'] = str(GPU)
 
 # define LOGGER
-    LOGGER = Logger('./'+EXP_NAME)
+    LOGGER = Logger('./logs/'+EXP_NAME)
 
     # FILE PATH #
     THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
     VECTORS = os.path.join(THIS_FOLDER, 'vectors.bin')
     ENTROPY_DIC = os.path.join(THIS_FOLDER, 'entropy_dic.bin')
     DATA_SET = os.path.join(THIS_FOLDER, 'data_set.bin')
-    RESULT_FILE = os.path.join(THIS_FOLDER, RESULT)
+    RESULT_FILE = os.path.join(THIS_FOLDER, 'results/'+EXP_NAME+'.bin')
 
 
 #############
@@ -267,7 +272,8 @@ def set_device(tensor):
     if cuda is available, set cuda.
     """
     if torch.cuda.is_available():
-        return tensor.cuda(GPU)
+        return tensor.cuda()
+        #return tensor.cuda(GPU)
     return tensor
 
 def get_sense_number(word):
@@ -415,6 +421,8 @@ def train(model, epochs, loss_function, training_data, validating_data, glove_in
     Returns:
         model trained
     """
+    best_model = None
+    best_epoch = 0
     bad_epoch_count = 0
     #best_validation_loss = math.inf
     best_validation_acc = 0
@@ -426,7 +434,7 @@ def train(model, epochs, loss_function, training_data, validating_data, glove_in
             print("epoch: ", epoch, "validate_loss: ", validation_loss)
             print("epoch: ", epoch, "train_acc: ", train_acc)
             print("epoch: ", epoch, "validate_acc: ", validation_acc)
-            return
+            return best_epoch, best_model
 
         ### training part
         model.train()
@@ -434,8 +442,6 @@ def train(model, epochs, loss_function, training_data, validating_data, glove_in
         train_correct = 0
         train_total = len(training_data)
         for batch_index in range(0, math.ceil(len(training_data)/BATCH_SIZE)):
-            if batch_index % 50 == 0:
-                print(epoch, "th epoch,", batch_index, "th training iteration start.")
             start = batch_index*BATCH_SIZE
             end = min(start+BATCH_SIZE, len(training_data))
             data_for_batch = training_data[start:end]
@@ -536,15 +542,15 @@ def train(model, epochs, loss_function, training_data, validating_data, glove_in
         LOGGER.scalar_summary('validate_loss', validation_loss, epoch)
         LOGGER.scalar_summary('validate_acc', validation_acc, epoch)
 
-        #if best_validation_loss < validation_loss:
         if best_validation_acc > validation_acc:
             bad_epoch_count = bad_epoch_count + 1
         else:
-            # TODO: 매 베스트마다 체크포인트 만들고 ㄱ모델 저장, 훈련끄탄고 가장 validate acc이 높았던 모델 가져오기:w
-            # TODO: learning rate decay
             best_validation_acc = validation_acc
             bad_epoch_count = 0
-
+            best_epoch = epoch
+            best_model = copy.deepcopy(model)
+    
+    return best_epoch, set_device(best_model)
 
 def evaluate(model, test_data, glove_index_dic, print_result=True):
     """
@@ -617,7 +623,8 @@ def evaluate(model, test_data, glove_index_dic, print_result=True):
                     acc_result[target_word] = (target_correct,
                                                target_total,
                                                (target_correct/target_total)*100)
-                acc_result['TOTAL'] = (correct,
+                acc_result['TOTAL'] = (len(acc_result.keys()),
+                                       correct,
                                        total,
                                        (correct/total)*100)
                 acc_result['META'] = ARGS
@@ -735,11 +742,36 @@ def filter_top_nword(training_data, validation_data, test_data):
 
         return training_data, validation_data, test_data
 
+def print_result():
+    """
+    print result from specific result file
+    """
+    with open(RESULT_FILE, 'rb') as fr_result, open(ENTROPY_DIC, 'rb') as fr_ent:
+        ent_dic = pickle.load(fr_ent)
+        result_dic = pickle.load(fr_result)
+        meta = result_dic['META']
+        total = result_dic['TOTAL']
+        del result_dic['META']
+        del result_dic['TOTAL']
+        print(meta)
+        if SINGLE_TARGET_WORD:
+            print(result_dic.get(SINGLE_TARGET_WORD, "No such word in result"), ent_dic[SINGLE_TARGET_WORD])
+        else:
+            item_list = list(map(lambda y: (ent_dic[y[0]], y), list(result_dic.items())))
+            item_list.sort(key=lambda y: y[0], reverse=True)
+            for item in item_list:
+                print(item)
+        print(total)
+ 
 
 def main():
     """
     this is main function
     """
+    if CHECK:
+        print_result()
+        return
+
     if BUILD_DATA_SET:
         training_data, validation_data, test_data, sense_len_dic = build_all_data_set()
     else:
@@ -762,11 +794,14 @@ def main():
     loss_function = set_device(nn.CrossEntropyLoss())
 
     # train model
-    train(model, EPOCHS, loss_function, training_data,
-          validation_data, glove_index_dic, print_count=20)
+    best_epoch, best_model = train(model, EPOCHS, loss_function, training_data,
+                                   validation_data, glove_index_dic, print_count=10)
 
+    print("best_model at", best_epoch)
     #### test part ####
     # test model
+    if BEST:
+        model = best_model
     evaluate(model, test_data, glove_index_dic)
 
 if __name__ == '__main__':
