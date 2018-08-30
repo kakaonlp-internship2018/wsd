@@ -123,7 +123,11 @@ Word Sense Disambiguation
     $ python3 practice_mixed_batch.py training_set.txt test_set.txt --data
     ~~~
   
-3. 커맨드라인 인자를 통해 모델의 여러 하이퍼파라미터를 지정해줄수 있습니다.
+3. 커맨드라인 인자를 통해 모델의 여러 하이퍼파라미터를 지정해줄수 있습니다.  
+    - ex) early stopping patience 10, 세번째 GPU device 사용, best validation model 사용, 타겟 단어 지정, 실험 이름 지정
+    ~~~
+    $ python3 practice_mixed_batch.py training_set.txt test_set.txt --patience 10 --gpu 2 --best --target 관/NNG --exp 관_실험
+    ~~~
 4. 평가 결과는 results/exp_name.bin 으로 저장되며 다음과 같이 결과를 확인할 수 있습니다.
     ~~~
     $ python3 practice_mixed_batch.py training_set.txt test_set.txt --check --exp exp_name
