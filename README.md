@@ -1,8 +1,7 @@
-# wsd
+# WSD
 Word Sense Disambiguation
   
 실험에 대한 전반적인 설명은 [발표자료](https://github.com/kakaonlp-internship2018/wsd/blob/ene5135-for-presentation/jeff_WSD_0829.pdf)를 참고하세요
-
 
 ## 코퍼스 전처리
 1. /entropy_multi_model 디렉토리의 transform.py 를 이용해 트레이닝 코퍼스와 테스트 코퍼스를 전처리 합니다.
@@ -11,8 +10,18 @@ Word Sense Disambiguation
     ~~~ 
     $ python3 transform.py ulsan_corpus_train.txt train_set.txt  
     $ python3 transform.py ulsan_corpus_test.txt test_set.txt 
+    ~~~  
+2. 위와같이 전처리를 거치지 않더라도 코퍼스가 다음과같이 
+    - 형태소 분석 및 의미번호 태깅이 되어있는 문장이  
+    - 한 Line당 하나씩 있는 형태면 됩니다.
     ~~~
-    
+    ...
+    13 검사__03/NNG 비용__03/NNG 은/JX NUM/SN 만__06/NR 원__01/NNB 정도__11/NNG ./SF
+    14 감마__02/NNG 나이프/NNG 로/JKB 간질__04/NNG 치료/NNG
+    15 ..
+    ...
+    ~~~
+
 ## Glove word embedding model 준비
 1. 워드 임베딩 학습을 위한 코퍼스를 준비합니다. (ex. KOMORAN 형태소 분석기를 거친 한국어 위키덤프 코퍼스)  
 2. [glove 사용법](https://github.com/stanfordnlp/GloVe)에 따라 워드임베딩 모델을 학습합니다. vectors.txt 파일로 결과가 저장됩니다. 
